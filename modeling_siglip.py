@@ -59,18 +59,7 @@ class SiglipVisionEmbeddings(nn.Module):
         
         
     def forward(self,pixel_values):
-        
-        
-        if isinstance(pixel_values, str):
-            transform = transforms.Compose([
-                transforms.Resize((self.image_size, self.image_size)),
-                transforms.ToTensor(),
-        ])
-        pixel_values = transform(Image.open(pixel_values)).unsqueeze(0)
-
-        if not isinstance(pixel_values, torch.Tensor):
-            raise TypeError("Input must be a tensor or a file path")
-            
+                
         
         patch_embeds  = self.patch_embedding(pixel_values)
         
@@ -84,12 +73,116 @@ class SiglipVisionEmbeddings(nn.Module):
         return embeddings        
     
     
+    
+class SiglipEncoderLayer(nn.Module):
+    def __init__(self,config :SiglipVisionConfig):
+        super().__init__()
+        
+        self.config= config
+        # MHA
+        self.self_atten =  SiglipAttention(config)
+        
+        #MLP
+        self.mlp = SiglipMLP(config)
+        
+        # layer normalization
+        self.layer_norm1 = nn.LayerNorm(config.hidden_size)
+        self.layer_norm2 = nn.LayerNorm(config.hidden_size)
+    
+
+    def forward(self,hidden_states: torch.Tensor):
+        
+        residual = hidden_states
+        
+        hidden_states = self.layer_norm1(hidden_states)
+        
+        hidden_states = self.self_atten(hidden_states)
+        
+        hidden_states = residual + hidden_states
+        
+        residual = hidden_states
+        
+        hidden_states = self.layer_norm2(hidden_states)
+        
+        hidden_states = self.mlp(hidden_states)
+        
+        hidden_states = residual + hidden_states
+        
+        return hidden_states
+    
+    
+class  SiglipEncoder(nn.Module):
+        def __init__(self, config:SiglipVisionConfig):
+            super(),__init__()
+            
+            self.config = config
+            
+            self.layers = nn.ModuleList([SiglipEncoderLayer(self.config) for _ in range(self.config.num_hidden_layers)])
+            
+        def forward(self,inputs_embeds:torch.Tensor):
+            
+            hidden_states = inputs_embeds
+            
+            for layer in self.layers:
+                
+                hidden_states = layer(inputs_embeds)
+                
+            return hidden_states
+        
+        
+        
+class SiglipVisionTransformer(nn.Module):
+    
+    def __init__(self,config:SiglipVisionConfig):
+        super().__init__()
+        
+        self.config = config
+        
+        self.embeddings  = SiglipVisionEmbeddings(self.config)
+        
+        self.encoder = SiglipEncoder(self.config)
+        
+        self.post_layernorm = nn.LayerNorm(self.config.hidden_size , eps = self.config.layer_norm_eps)
+        
+        
+    def forward(self, pixel_values : torch.Tensor):
+        
+        hidden_states =self.embeddings(pixel_values)
+        
+        last_hidden_states = self.encoder(hidden_states)
+        
+        last_hidden_states = self.post_layernorm(last_hidden_states)
+        
+        return last_hidden_states
+        
+
+
+class SiglipVisionModel(nn.Module):
+
+    def __init__(self, config: SiglipVisionConfig):
+        super().__init__()
+        self.config = config
+        self.vision_model = SiglipVisionTransformer(config)
+
+    def forward(self, pixel_values) -> Tuple:
+        return self.vision_model(pixel_values=pixel_values) 
+
+
+
+
 
 if __name__ == "__main__":
     img = "./dog.jpg"
+    
+    transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+    ])
+    pixel_values = transform(Image.open(img)).unsqueeze(0)
+
     cfg = SiglipVisionConfig()
     embd = SiglipVisionEmbeddings(cfg)
     
 
     
-    print(embd(img).shape)
+    print(embd(pixel_values).shape)
