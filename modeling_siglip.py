@@ -244,8 +244,7 @@ if __name__ == "__main__":
     pixel_values = transform(Image.open(img)).unsqueeze(0)
 
     cfg = SiglipVisionConfig()
-    embd = SiglipVisionEmbeddings(cfg)
+    model = SiglipVisionModel(cfg)
     
-
     
-    print(embd(pixel_values).shape)
+    print(model(pixel_values).shape)
