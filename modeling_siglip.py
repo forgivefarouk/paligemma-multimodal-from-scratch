@@ -73,7 +73,70 @@ class SiglipVisionEmbeddings(nn.Module):
         return embeddings        
     
     
-    
+class SiglipAttention(nn.Module):
+    def __init__(self,config:SiglipVisionConfig):
+        super().__init__()
+        
+        self.config = config
+        self.num_heads = config.num_attention_heads
+        self.embed_dim = config.hidden_size
+        self.head_dim = self.embed_dim // self.num_heads
+        self.dropout = self.config.attention_dropout
+        
+        
+        if self.embed_dim % self.num_heads != 0:
+            raise ValueError(f"Embedding dimension {self.embed_dim} must be divisible by number of heads {self.num_heads}")
+        
+        self.q_proj = nn.Linear(self.embed_dim , self.embed_dim)
+        self.k_proj = nn.Linear(self.embed_dim , self.embed_dim)
+        self.v_proj = nn.Linear(self.embed_dim , self.embed_dim)
+        self.out_proj = nn.Linear(self.embed_dim , self.embed_dim)
+        
+    def forward(self,hidden_states:torch.Tensor):
+        
+        batch_size , seq_len , _  = hidden_states.size()
+        
+        q = self.q_proj(hidden_states)
+        k = self.k_proj(hidden_states)
+        v = self.v_proj(hidden_states)
+        
+        # [batch_size , sql_len , embed_dim] --> [batch_size , sql_len ,heads , head_dim] --> [batch_size ,heads, sql_len , head_dim]
+        q = q.view(batch_size , seq_len, self.num_heads,self.head_dim).transpose(1,2)
+        k = k.view(batch_size , seq_len, self.num_heads,self.head_dim).transpose(1,2)
+        v = v.view(batch_size , seq_len, self.num_heads,self.head_dim).transpose(1,2)
+        
+        attn_weights = torch.matmul(q ,k.transpose(2,3)) / torch.sqrt(torch.tensor(self.head_dim, dtype=q.dtype))
+        
+        attn_weights = nn.functional.softmax(attn_weights , dim=-1)
+        attn_weights = nn.functional.dropout(attn_weights, p=self.dropout, training=self.training)
+        
+        attn_output = torch.matmul(attn_weights, v)
+        
+        attn_output = attn_output.transpose(1,2).contiguous().view(batch_size,seq_len,self.embed_dim)
+        
+        attn_output = self.out_proj(attn_output)
+        
+        return attn_output
+        
+        
+        
+class SiglipMLP(nn.Module):
+    def __init__(self,config):
+        super().__init__()
+        
+        self.config = config
+        
+        self.fc1 = nn.Linear(config.hidden_size, config.intermediate_size)
+        self.fc2 = nn.Linear(config.intermediate_size, config.hidden_size)
+        
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        hidden_states = self.fc1(hidden_states)
+        hidden_states = nn.functional.gelu(hidden_states, approximate="tanh")
+        hidden_states = self.fc2(hidden_states) 
+        
+        return hidden_states      
+        
+        
 class SiglipEncoderLayer(nn.Module):
     def __init__(self,config :SiglipVisionConfig):
         super().__init__()
@@ -113,7 +176,7 @@ class SiglipEncoderLayer(nn.Module):
     
 class  SiglipEncoder(nn.Module):
         def __init__(self, config:SiglipVisionConfig):
-            super(),__init__()
+            super().__init__()
             
             self.config = config
             
